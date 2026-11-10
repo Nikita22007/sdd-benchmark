@@ -1,0 +1,8 @@
+{
+  "name": "Codex judge",
+  "requires_model": true,
+  "command": [
+    "{python}",
+    "{judge}/judge.py"
+  ]
+}

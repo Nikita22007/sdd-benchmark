@@ -1,5 +1,6 @@
 {
-  "name": "OpenSpec 1.16.0",
+  "name": "OpenSpec",
+  "intent_marker": "openspec/changes/*/tasks.md",
   "setup_command": [
     "{python}",
     "{approach}/setup.py"

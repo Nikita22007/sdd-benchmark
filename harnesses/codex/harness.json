@@ -1,6 +1,7 @@
 {
   "name": "Codex CLI",
   "requires_model": true,
+  "sandbox": "workspace-write",
   "command": [
     "{python}",
     "{harness}/agent.py"

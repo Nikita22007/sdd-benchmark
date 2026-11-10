@@ -1,0 +1,8 @@
+{
+  "name": "Stub judge",
+  "requires_model": false,
+  "command": [
+    "{python}",
+    "{judge}/judge.py"
+  ]
+}

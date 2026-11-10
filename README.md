@@ -36,6 +36,29 @@ python benchmark.py --task catalog-search --approach demo --harness demo --judge
 
 Ограничение остаётся: исполнитель работает с правами текущего пользователя, скрытость путей не является защитой, а настоящая изоляция требует контейнера или виртуальной машины. Запускайте только доверенные команды.
 
+## Два варианта подхода OpenSpec
+
+Один и тот же процесс OpenSpec подключён двумя конфигурациями, чтобы их можно было сравнивать.
+
+| Подход | Как идёт работа |
+|---|---|
+| `openspec` | один запуск исполнителя: он сам решает, когда создать артефакты, реализовать инкремент и синхронизировать спецификации |
+| `openspec-phased` | четыре шага `propose → apply → sync → archive`, каждый — отдельный процесс исполнителя |
+
+У пошагового варианта каждый шаг запускается новым процессом, поэтому контекст между шагами не переносится — аналог `/clear` в ручном цикле. Состояние живёт только в файлах рабочей копии.
+
+Вызов шага зависит от харнеса:
+
+| Харнес | Как вызывается |
+|---|---|
+| `codex` | `$openspec-propose`, `$openspec-apply-change`, `$openspec-sync-specs`, `$openspec-archive-change` |
+| `deepseek` | `/openspec-propose`, `/openspec-apply-change`, `/openspec-sync-specs`, `/openspec-archive-change` |
+| `qwen-code` | `/opsx-propose`, `/opsx-apply`, `/opsx-sync`, `/opsx-archive` |
+
+Между шагами ядро проверяет объявленные артефакты: после `propose` должен появиться `openspec/changes/*/tasks.md`, после `sync` — файлы в `openspec/specs/`, после `archive` — запись в `openspec/changes/archive/`. Если артефакта нет, протокол фиксирует неудавшийся шаг, оставшиеся пропускаются, а исход прогона — `FAIL_PROCESS`.
+
+Для пошагового прогона `result.steps` содержит по записи на шаг (статус, время, расход, найденные артефакты), `result.protocol` — режим и точку отказа, а `result.phases` — по фазе на шаг. Поэтому расход по фазам у пошагового подхода измерим, у прямого — нет.
+
 ## Набор сценариев
 
 `tasks/` содержит одиннадцать пакетов: демонстрационную `catalog-search` и десять `quixbugs-*` из набора [QuixBugs](tasks/PROVENANCE.md) (MIT, ревизия `4257f44`): `bitcount`, `bucketsort`, `find_first_in_sorted`, `flatten`, `gcd`, `is_valid_parenthesization`, `kheapsort`, `lcs_length`, `max_sublist_sum`, `next_palindrome`.

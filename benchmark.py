@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 
-from telemetry import unavailable
+from telemetry import TOKEN_FIELDS, unavailable
 from vendor.harness2 import runmark
 
 ROOT = Path(__file__).resolve().parent
@@ -202,7 +202,84 @@ def phase(name, record):
         "usage": "turn" if name == "agent" and record else ("missing" if record else None),
     }
 
-def outcome_of(setup, agent, evaluation, intent, passed):
+def approach_steps(approach):
+    """The approach's declared steps, or an empty list for a single-session run."""
+    steps = approach.get("steps") or []
+    if not isinstance(steps, list):
+        raise ValueError("approach steps must be a list")
+    names = []
+    for step in steps:
+        if not isinstance(step, dict) or not isinstance(step.get("name"), str) or not step["name"].strip():
+            raise ValueError("every step needs a non-empty name")
+        names.append(step["name"])
+    if len(set(names)) != len(names):
+        raise ValueError("step names must be unique")
+    return steps
+
+
+def step_prompt(step, harness_name, task_text):
+    invoke = (step.get("invoke") or {}).get(harness_name) or (step.get("invoke") or {}).get("default")
+    parts = []
+    if invoke:
+        parts.append(f"Выполните шаг процесса: {invoke}.")
+    parts.append("Запрос задачи:\n" + task_text.strip())
+    parts.append(
+        "Прочитайте TASK.md, APPROACH.md и все файлы в sdd-context/. "
+        "Работайте только в текущем каталоге."
+    )
+    return "\n\n".join(parts)
+
+
+def usage_from(telemetry):
+    totals = {}
+    for request in (telemetry or {}).get("requests") or []:
+        for field, entry in (request.get("usage") or {}).items():
+            if entry.get("value") is not None:
+                totals[field] = totals.get(field, 0) + entry["value"]
+    return totals
+
+
+def required_artifacts(work, step):
+    """Check the artifact the step is supposed to leave behind; None when the step declares none."""
+    pattern = step.get("require_glob")
+    if not pattern:
+        return None, []
+    matches = sorted(path.relative_to(work).as_posix() for path in work.glob(pattern))
+    return bool(matches), matches
+
+
+def steps_telemetry(steps_record):
+    """One telemetry document for a phased run: one request row per step that reported usage."""
+    rows = []
+    for step in steps_record:
+        usage = step.get("usage") or {}
+        if not usage:
+            continue
+        fields = {
+            field: {
+                "value": usage.get(field),
+                "provenance": "reported" if usage.get(field) is not None else "missing",
+            }
+            for field in TOKEN_FIELDS
+        }
+        rows.append({"index": len(rows) + 1, "state": "completed", "step": step["name"], "usage": fields})
+    if not rows:
+        return unavailable("no step reported usage")
+    reported = any(any(field["value"] is not None for field in row["usage"].values()) for row in rows)
+    return {
+        "source": "steps",
+        "scope": "step",
+        "usage_granularity": "step",
+        "request_usage": "reported" if reported else "missing",
+        "sources": {"events": "per-step harness stdout", "usage": "per-step telemetry adapter"},
+        "events": None,
+        "invalid_lines": [],
+        "requests": rows,
+        "steps": [step["name"] for step in steps_record],
+    }
+
+
+def outcome_of(setup, agent, evaluation, intent, passed, protocol=None):
     """One terminal outcome per run: what the series can be counted by.
 
     Order matters: infrastructure and time limits are reported before a product verdict, and a
@@ -217,6 +294,8 @@ def outcome_of(setup, agent, evaluation, intent, passed):
             return "INFRA_ERROR"
     if agent is None:
         return "INFRA_ERROR"
+    if protocol and protocol.get("failed_step"):
+        return "FAIL_PROCESS"
     if evaluation is None:
         return "FAIL_PRODUCT"
     if evaluation["status"] != "completed":
@@ -277,6 +356,7 @@ def run(task_name, approach_name, harness_name, timeout, allow_model, harness_co
         raise ValueError("model judge requires explicit --allow-model")
     task = load(task_dir / "task.json")
     approach = load(approach_dir / "approach.json")
+    steps = approach_steps(approach)
     started_at = dt.datetime.now(dt.timezone.utc).isoformat()
     run_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     out = ROOT / "runs" / run_id
@@ -327,11 +407,60 @@ def run(task_name, approach_name, harness_name, timeout, allow_model, harness_co
         setup = execute(expand(approach["setup_command"]), work, env, timeout, out / "setup")
     agent = None
     agent_env = dict(env)
+    steps_record = []
+    protocol = {"mode": "phased" if steps else "single", "total": len(steps), "completed": 0}
     intent = {"marker": approach.get("intent_marker"), "ready": None, "elapsed_seconds": None, "source": "not configured"}
     if setup is None or (setup["status"] == "completed" and setup["exit_code"] == 0):
         watch = IntentWatch(work, approach["intent_marker"]).start() if approach.get("intent_marker") else None
         agent_env = dict(env)
-        agent = execute(expand(harness["command"]), work, env, timeout, out / "agent")
+        task_text = (work / "TASK.md").read_text(encoding="utf-8")
+        if steps:
+            for step in steps:
+                step_dir = out / "steps" / step["name"]
+                step_dir.mkdir(parents=True)
+                config_path = step_dir / "harness-parameters.json"
+                config_path.write_text(
+                    json.dumps({**overrides, "prompt": step_prompt(step, harness_name, task_text)}, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                step_env = dict(env)
+                step_env["BENCH_HARNESS_CONFIG"] = str(config_path)
+                step_env["BENCH_AGENT_STDOUT"] = str(step_dir / "stdout.bin")
+                record = execute(expand(harness["command"]), work, step_env, timeout, step_dir)
+                entry = {"name": step["name"], "invoke": (step.get("invoke") or {}).get(harness_name), **record}
+                step_telemetry = None
+                if harness.get("telemetry_command") and record["status"] == "completed":
+                    adapter = execute(expand(harness["telemetry_command"]), work, step_env, timeout, step_dir / "telemetry")
+                    entry["telemetry"] = adapter
+                    if adapter["status"] == "completed" and adapter["exit_code"] == 0:
+                        try:
+                            candidate = load(step_dir / "telemetry" / "stdout.bin")
+                            step_telemetry = candidate if isinstance(candidate, dict) else None
+                        except (ValueError, UnicodeDecodeError, OSError):
+                            step_telemetry = None
+                entry["usage"] = usage_from(step_telemetry) or None
+                ok_artifacts, matches = required_artifacts(work, step)
+                entry["artifacts_ok"] = ok_artifacts
+                entry["artifacts"] = matches
+                steps_record.append(entry)
+                if record["status"] != "completed" or record["exit_code"] != 0:
+                    protocol["failed_step"] = step["name"]
+                    protocol["reason"] = "step did not complete"
+                    break
+                if ok_artifacts is False:
+                    protocol["failed_step"] = step["name"]
+                    protocol["reason"] = "required artifacts missing"
+                    break
+                protocol["completed"] += 1
+            finished = protocol["completed"] == len(steps) and "failed_step" not in protocol
+            last = steps_record[-1] if steps_record else None
+            agent = {
+                "status": "completed" if finished else (last["status"] if last else "error"),
+                "exit_code": 0 if finished else ((last or {}).get("exit_code") if (last or {}).get("exit_code") is not None else 1),
+                "duration_seconds": round(sum((item["duration_seconds"] or 0) for item in steps_record), 3),
+            }
+        else:
+            agent = execute(expand(harness["command"]), work, env, timeout, out / "agent")
         if watch is not None:
             intent = watch.stop()
     isolation = inspect_isolation(work, task_dir, agent_env, harness.get("sandbox"))
@@ -340,7 +469,9 @@ def run(task_name, approach_name, harness_name, timeout, allow_model, harness_co
         evaluation = execute(expand(task["evaluation_command"]), task_dir / "evaluation", env, timeout, out / "evaluation")
     passed = evaluation is not None and evaluation["status"] == "completed" and evaluation["exit_code"] == 0
     telemetry = unavailable("harness has no telemetry adapter")
-    if agent is not None and harness.get("telemetry_command"):
+    if steps and steps_record:
+        telemetry = steps_telemetry(steps_record)
+    elif agent is not None and harness.get("telemetry_command"):
         adapter = execute(expand(harness["telemetry_command"]), work, env, timeout, out / "telemetry")
         if adapter["status"] == "completed" and adapter["exit_code"] == 0:
             try:
@@ -373,8 +504,23 @@ def run(task_name, approach_name, harness_name, timeout, allow_model, harness_co
         else:
             judge.update({"status": "failed", "note": "judge did not complete"})
     (out / "judge.json").write_text(json.dumps(judge, ensure_ascii=False, indent=2), encoding="utf-8")
-    phases = [phase("setup", setup), phase("agent", agent), phase("evaluation", evaluation), phase("telemetry", telemetry.get("adapter")), phase("judge", judge_record)]
-    result = {"schema_version": 1, "run_id": run_id, "task": task_name, "approach": approach_name, "harness": harness_name, "setup": setup, "started_at": started_at, "agent": agent, "evaluation": evaluation, "judge": {key: judge[key] for key in ("name", "status", "score", "note")}, "phases": phases, "intent": intent, "isolation": isolation, "manifest": manifest, "outcome": outcome_of(setup, agent, evaluation, intent, passed), "usage_note": USAGE_NOTE, "status": "passed" if passed else "failed"}
+    if steps and steps_record:
+        phases = (
+            [phase("setup", setup)]
+            + [
+                {
+                    "name": f"step:{step['name']}",
+                    "status": step["status"],
+                    "duration_seconds": step["duration_seconds"],
+                    "usage": "reported" if step.get("usage") else "missing",
+                }
+                for step in steps_record
+            ]
+            + [phase("evaluation", evaluation), phase("telemetry", telemetry.get("adapter")), phase("judge", judge_record)]
+        )
+    else:
+        phases = [phase("setup", setup), phase("agent", agent), phase("evaluation", evaluation), phase("telemetry", telemetry.get("adapter")), phase("judge", judge_record)]
+    result = {"schema_version": 1, "run_id": run_id, "task": task_name, "approach": approach_name, "harness": harness_name, "setup": setup, "started_at": started_at, "agent": agent, "evaluation": evaluation, "judge": {key: judge[key] for key in ("name", "status", "score", "note")}, "phases": phases, "steps": steps_record, "protocol": protocol, "intent": intent, "isolation": isolation, "manifest": manifest, "outcome": outcome_of(setup, agent, evaluation, intent, passed, protocol), "usage_note": USAGE_NOTE, "status": "passed" if passed else "failed"}
     (out / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     print("Artifacts:", out)

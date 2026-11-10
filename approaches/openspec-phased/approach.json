@@ -1,0 +1,46 @@
+{
+  "name": "OpenSpec (пошаговый)",
+  "intent_marker": "openspec/changes/*/tasks.md",
+  "setup_command": [
+    "{python}",
+    "{approach}/setup.py"
+  ],
+  "steps": [
+    {
+      "name": "propose",
+      "require_glob": "openspec/changes/*/tasks.md",
+      "invoke": {
+        "codex": "$openspec-propose",
+        "deepseek": "/openspec-propose",
+        "qwen-code": "/opsx-propose"
+      }
+    },
+    {
+      "name": "apply",
+      "require_glob": "openspec/changes/*/tasks.md",
+      "invoke": {
+        "codex": "$openspec-apply-change",
+        "deepseek": "/openspec-apply-change",
+        "qwen-code": "/opsx-apply"
+      }
+    },
+    {
+      "name": "sync",
+      "require_glob": "openspec/specs/**/*.md",
+      "invoke": {
+        "codex": "$openspec-sync-specs",
+        "deepseek": "/openspec-sync-specs",
+        "qwen-code": "/opsx-sync"
+      }
+    },
+    {
+      "name": "archive",
+      "require_glob": "openspec/changes/archive/*",
+      "invoke": {
+        "codex": "$openspec-archive-change",
+        "deepseek": "/openspec-archive-change",
+        "qwen-code": "/opsx-archive"
+      }
+    }
+  ]
+}

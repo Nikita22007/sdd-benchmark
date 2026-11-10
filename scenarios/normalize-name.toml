@@ -1,0 +1,9 @@
+name = "normalize-name"
+description = "Нормализация имени: обрезка пробелов и приведение регистра"
+
+goal = '''
+def normalize(name):
+    return name.strip().casefold()
+'''
+
+check = "casefold()"

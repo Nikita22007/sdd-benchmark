@@ -1,0 +1,9 @@
+name = "sum-bytes"
+description = "Функция складывает значения из списка"
+
+goal = '''
+def total(values):
+    return sum(values)
+'''
+
+check = "return sum(values)"

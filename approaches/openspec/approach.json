@@ -1,0 +1,7 @@
+{
+  "name": "OpenSpec 1.16.0",
+  "setup_command": [
+    "{python}",
+    "{approach}/setup.py"
+  ]
+}

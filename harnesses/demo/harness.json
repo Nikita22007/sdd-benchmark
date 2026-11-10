@@ -1,0 +1,8 @@
+{
+  "name": "demo",
+  "command": [
+    "{python}",
+    "{harness}/agent.py"
+  ],
+  "requires_model": false
+}

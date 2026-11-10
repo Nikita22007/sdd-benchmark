@@ -1,0 +1,8 @@
+{
+  "name": "Codex CLI",
+  "requires_model": true,
+  "command": [
+    "{python}",
+    "{harness}/agent.py"
+  ]
+}

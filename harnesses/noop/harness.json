@@ -1,0 +1,9 @@
+{
+  "name": "noop",
+  "command": [
+    "{python}",
+    "-c",
+    "pass"
+  ],
+  "requires_model": false
+}

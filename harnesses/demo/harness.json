@@ -1,8 +1,12 @@
 {
   "name": "demo",
+  "requires_model": false,
+  "install": {
+    "mode": "home",
+    "files": {}
+  },
   "command": [
     "{python}",
     "{harness}/agent.py"
-  ],
-  "requires_model": false
+  ]
 }

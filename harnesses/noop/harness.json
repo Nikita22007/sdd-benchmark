@@ -1,9 +1,13 @@
 {
   "name": "noop",
+  "requires_model": false,
+  "install": {
+    "mode": "home",
+    "files": {}
+  },
   "command": [
     "{python}",
     "-c",
     "pass"
-  ],
-  "requires_model": false
+  ]
 }

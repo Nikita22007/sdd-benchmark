@@ -19,6 +19,98 @@ ROOT = Path(__file__).resolve().parent
 USAGE_NOTE = "usage is reported per turn only; per-phase spend is unavailable"
 ISOLATION_NOTE = "closed checks stay outside the working copy; the executor's filesystem boundary is the harness sandbox"
 
+# Names the executor never needs, borrowed from the reference method's scrub list.
+SECRET_ENV = frozenset(
+    {
+        "DEEPSEEK_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "HARNESS2_JUDGE_API_KEY",
+    }
+)
+
+# Text a grader writes; none of it belongs in the executor's working copy.
+GRADER_MARKERS = (
+    "judge.json",
+    "n_passed",
+    "n_criteria",
+    "pass_rate",
+    "deterministic_eval",
+    "reference_answer",
+)
+TEXT_SUFFIXES = frozenset({".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".py", ".log", ".csv", ""})
+
+
+def executor_env(base, harness_spec):
+    """Copy the environment without secrets, keeping only what the harness declares it needs."""
+    keep = set(harness_spec.get("env_keep") or ())
+    env, dropped = {}, []
+    for key, value in base.items():
+        if key in SECRET_ENV and key not in keep:
+            dropped.append(key)
+            continue
+        env[key] = value
+    return env, sorted(dropped)
+
+
+def install(home_root, harness_spec):
+    """Materialise the harness's own configuration instead of inheriting the host's.
+
+    `inherit` keeps the ambient home: that is honest for harnesses whose credentials live there,
+    and the manifest records it. `home` builds `runs/<id>/home` from the package's declared files
+    and points HOME, USERPROFILE and the declared variables at it.
+    """
+    spec = harness_spec.get("install") or {"mode": "inherit"}
+    mode = spec.get("mode", "inherit")
+    if mode == "inherit":
+        return None, {}, {"mode": "inherit", "fingerprint": None, "files": [], "env": []}
+    if mode != "home":
+        raise ValueError(f"unknown install mode {mode!r}; expected inherit or home")
+    files = spec.get("files") or {}
+    home = Path(home_root)
+    home.mkdir(parents=True, exist_ok=True)
+    for relative, content in files.items():
+        target = home / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    variables = {name: str(home) for name in spec.get("env") or ()}
+    variables.setdefault("HOME", str(home))
+    variables.setdefault("USERPROFILE", str(home))
+    return home, variables, {
+        "mode": "home",
+        "fingerprint": runmark.fingerprint(home),
+        "files": sorted(files),
+        "env": sorted(variables),
+    }
+
+
+def grader_markers(work):
+    """Find grader output that reached the working copy, by marker text."""
+    hits = []
+    for path in work.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES:
+            continue
+        try:
+            if path.stat().st_size > 2_000_000:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for marker in GRADER_MARKERS:
+            if marker in text:
+                hits.append(f"{path.relative_to(work)}:{marker}")
+                break
+    return sorted(hits)
+
+
 
 def inside(child, parent):
     try:
@@ -49,6 +141,7 @@ def inspect_isolation(work, task_dir, agent_env, sandbox):
         "workspace_outside_task_package": not inside(work, task_dir),
         "evaluation_outside_workspace": not inside(evaluation, work),
         "references_in_workspace": sorted(copied),
+        "grader_markers": grader_markers(work),
         "env_exposes_task_package": leaks,
         "harness_sandbox": sandbox,
         "note": ISOLATION_NOTE,
@@ -209,8 +302,13 @@ def run(task_name, approach_name, harness_name, timeout, allow_model, harness_co
         "python": sys.version.split()[0],
     }
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    env = os.environ.copy()
+    env, scrubbed = executor_env(os.environ, harness)
+    home, home_vars, install_record = install(out / "home", harness)
+    env.update(home_vars)
     env.update({"BENCH_WORKSPACE": str(work), "BENCH_TASK": str(work / "TASK.md"), "BENCH_CONTEXT": str(work / "sdd-context"), "BENCH_APPROACH": str(work / "APPROACH.md"), "BENCH_HARNESS": harness_name, "BENCH_PYTHON": sys.executable, "PYTHONIOENCODING": "utf-8"})
+    manifest["install"] = install_record
+    manifest["env_scrubbed"] = scrubbed
+    (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     def expand(command):
         replacements = {"{python}": sys.executable, "{approach}": str(approach_dir), "{task}": str(task_dir), "{harness}": str(harness_dir), "{judge}": str(judge_dir) if judge_dir else ""}
         for key, value in replacements.items():

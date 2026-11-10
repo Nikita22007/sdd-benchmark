@@ -1,6 +1,10 @@
 {
   "name": "gold (control)",
   "requires_model": false,
+  "install": {
+    "mode": "home",
+    "files": {}
+  },
   "command": [
     "{python}",
     "{harness}/apply.py",

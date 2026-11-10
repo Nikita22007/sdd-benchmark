@@ -1,0 +1,13 @@
+{
+  "name": "DeepSeek Harness",
+  "requires_model": true,
+  "sandbox": "workspace-write",
+  "command": [
+    "{python}",
+    "{harness}/agent.py"
+  ],
+  "telemetry_command": [
+    "{python}",
+    "{harness}/telemetry_adapter.py"
+  ]
+}

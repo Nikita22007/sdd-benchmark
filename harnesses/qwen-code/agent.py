@@ -57,7 +57,10 @@ def main():
         print(str(error), file=sys.stderr)
         return 2
     prompt = config.get("prompt") or default_prompt()
-    return subprocess.run([qwen, *args, prompt], cwd=os.environ["BENCH_WORKSPACE"]).returncode
+    # An inherited stdin lets the CLI wait forever for an answer; EOF fails fast instead.
+    return subprocess.run(
+        [qwen, *args, prompt], cwd=os.environ["BENCH_WORKSPACE"], stdin=subprocess.DEVNULL
+    ).returncode
 
 
 if __name__ == "__main__":

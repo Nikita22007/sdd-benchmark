@@ -22,6 +22,28 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(p.returncode,0,p.stderr)
             self.assertEqual(json.loads((tmp / "captured.json").read_text()),["--output-format","stream-json","test prompt"])
 
+    def test_adapters_do_not_wait_on_stdin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tmp = Path(directory)
+            fake = tmp / "fake.py"
+            fake.write_text("import pathlib, sys\npathlib.Path('stdin.txt').write_text(str(len(sys.stdin.read())))\n", encoding="utf-8")
+            config = tmp / "config.json"
+            config.write_text(json.dumps({"executable": sys.executable, "args": [str(fake)], "prompt": "p"}), encoding="utf-8")
+            env = os.environ.copy()
+            env.update(BENCH_HARNESS_CONFIG=str(config), BENCH_WORKSPACE=str(tmp))
+            for adapter in ("codex", "deepseek", "qwen-code"):
+                with self.subTest(adapter=adapter):
+                    (tmp / "stdin.txt").unlink(missing_ok=True)
+                    process = subprocess.run(
+                        [sys.executable, str(ROOT / f"harnesses/{adapter}/agent.py")],
+                        cwd=tmp,
+                        env=env,
+                        capture_output=True,
+                        timeout=30,
+                    )
+                    self.assertEqual(process.returncode, 0, process.stderr)
+                    self.assertEqual((tmp / "stdin.txt").read_text(), "0", "the CLI must see EOF, not wait")
+
     def test_qwen_adapter_builds_approval_arguments(self):
         import importlib.util
 

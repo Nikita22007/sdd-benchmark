@@ -42,7 +42,10 @@ def main():
         return 2
     prompt = config.get("prompt") or default_prompt()
     workspace = os.environ["BENCH_WORKSPACE"]
-    return subprocess.run([codex, *args, "-C", workspace, prompt]).returncode
+    # An inherited stdin lets the CLI wait forever for an answer; EOF fails fast instead.
+    return subprocess.run(
+        [codex, *args, "-C", workspace, prompt], stdin=subprocess.DEVNULL
+    ).returncode
 
 
 if __name__ == "__main__":

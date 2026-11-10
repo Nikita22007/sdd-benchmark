@@ -52,7 +52,10 @@ def main():
             print("api_key_file not found: " + str(path), file=sys.stderr)
             return 2
         env["DEEPSEEK_API_KEY"] = path.read_text(encoding="utf-8").strip()
-    return subprocess.run([dsh, *args, prompt], cwd=os.environ["BENCH_WORKSPACE"], env=env).returncode
+    # An inherited stdin lets the CLI wait forever for an answer; EOF fails fast instead.
+    return subprocess.run(
+        [dsh, *args, prompt], cwd=os.environ["BENCH_WORKSPACE"], env=env, stdin=subprocess.DEVNULL
+    ).returncode
 
 
 if __name__ == "__main__":

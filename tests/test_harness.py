@@ -20,7 +20,54 @@ class HarnessTests(unittest.TestCase):
             env.update(BENCH_HARNESS_CONFIG=str(config), BENCH_WORKSPACE=str(tmp))
             p = subprocess.run([sys.executable,str(ROOT / "harnesses/qwen-code/agent.py")],cwd=tmp,env=env,capture_output=True)
             self.assertEqual(p.returncode,0,p.stderr)
-            self.assertEqual(json.loads((tmp / "captured.json").read_text()),["--output-format","stream-json","-p","test prompt"])
+            self.assertEqual(json.loads((tmp / "captured.json").read_text()),["--output-format","stream-json","test prompt"])
+
+    def test_qwen_adapter_builds_approval_arguments(self):
+        import importlib.util
+
+        path = ROOT / "harnesses/qwen-code/agent.py"
+        spec = importlib.util.spec_from_file_location("qwen_agent", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertEqual(
+            module.build_args({"approval_mode": "auto"}),
+            ["--output-format", "stream-json", "--approval-mode", "auto"],
+        )
+        self.assertEqual(module.build_args({"approval_mode": "none"}), ["--output-format", "stream-json"])
+        self.assertEqual(module.build_args({"args": ["--custom"]}), ["--custom"])
+
+    def test_qwen_telemetry_adapter_reads_result_stats(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw = Path(directory) / "stdout"
+            raw.write_text(
+                "\n".join(
+                    [
+                        '{"type":"init","sessionId":"s"}',
+                        '{"type":"message","role":"assistant","content":"готово"}',
+                        '{"type":"result","stats":{"inputTokens":120,"outputTokens":8,"cachedTokens":30,"totalTokens":158}}',
+                        "{bad}",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["BENCH_AGENT_STDOUT"] = str(raw)
+            process = subprocess.run(
+                [sys.executable, str(ROOT / "harnesses/qwen-code/telemetry_adapter.py")],
+                env=env,
+                capture_output=True,
+                check=True,
+            )
+            data = json.loads(process.stdout)
+            self.assertEqual(data["source"], "qwen_stream_json")
+            self.assertEqual(data["scope"], "run")
+            self.assertEqual(data["request_usage"], "reported")
+            self.assertEqual(data["invalid_lines"], [4])
+            usage = data["requests"][0]["usage"]
+            self.assertEqual(usage["input_tokens"]["value"], 120)
+            self.assertEqual(usage["cached_input_tokens"]["value"], 30)
+            self.assertEqual(usage["output_tokens"]["value"], 8)
+            self.assertEqual(usage["reasoning_output_tokens"]["provenance"], "missing")
 
     def test_codex_adapter_passes_runner_context_without_model(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -1,7 +1,4 @@
 {
   "executable": "qwen",
-  "args": [
-    "--output-format",
-    "stream-json"
-  ]
+  "approval_mode": "auto"
 }

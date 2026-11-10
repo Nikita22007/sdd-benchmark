@@ -1,0 +1,7 @@
+{
+  "executable": "qwen",
+  "args": [
+    "--output-format",
+    "stream-json"
+  ]
+}

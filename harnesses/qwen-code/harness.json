@@ -1,0 +1,8 @@
+{
+  "name": "Qwen Code",
+  "requires_model": true,
+  "command": [
+    "{python}",
+    "{harness}/agent.py"
+  ]
+}

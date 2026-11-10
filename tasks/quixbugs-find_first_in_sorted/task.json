@@ -1,0 +1,7 @@
+{
+  "name": "Первое вхождение в отсортированном списке",
+  "evaluation_command": [
+    "{python}",
+    "{task}/evaluation/check.py"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Сортировка списка",
+  "evaluation_command": [
+    "{python}",
+    "{task}/evaluation/check.py"
+  ]
+}

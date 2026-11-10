@@ -1,0 +1,7 @@
+{
+  "name": "Длина наибольшей общей подпоследовательности",
+  "evaluation_command": [
+    "{python}",
+    "{task}/evaluation/check.py"
+  ]
+}

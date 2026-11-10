@@ -1,0 +1,7 @@
+{
+  "name": "Количество единичных битов",
+  "evaluation_command": [
+    "{python}",
+    "{task}/evaluation/check.py"
+  ]
+}

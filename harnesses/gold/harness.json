@@ -1,0 +1,9 @@
+{
+  "name": "gold (control)",
+  "requires_model": false,
+  "command": [
+    "{python}",
+    "{harness}/apply.py",
+    "{task}"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Наибольший общий делитель",
+  "evaluation_command": [
+    "{python}",
+    "{task}/evaluation/check.py"
+  ]
+}

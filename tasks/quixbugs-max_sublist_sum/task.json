@@ -1,0 +1,7 @@
+{
+  "name": "Максимальная сумма подотрезка",
+  "evaluation_command": [
+    "{python}",
+    "{task}/evaluation/check.py"
+  ]
+}

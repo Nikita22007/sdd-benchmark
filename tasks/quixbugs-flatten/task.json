@@ -1,0 +1,7 @@
+{
+  "name": "Разворачивание вложенных списков",
+  "evaluation_command": [
+    "{python}",
+    "{task}/evaluation/check.py"
+  ]
+}
